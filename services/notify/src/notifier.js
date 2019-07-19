@@ -3,6 +3,9 @@ const _ = require('lodash');
 const path = require('path');
 const crypto = require('crypto');
 const marked = require('marked');
+const createDOMPurify = require('dompurify');
+const striptags = require('striptags');
+const {JSDOM} = require('jsdom');
 const Email = require('email-templates');
 const nodemailer = require('nodemailer');
 
@@ -19,6 +22,14 @@ class Notifier {
     this.queueName = this.options.queueName;
     this.sender = options.sourceEmail;
     this.monitor = options.monitor;
+
+    const window = (new JSDOM('', {
+      features: {
+        FetchExternalResources: false,
+        ProcessExternalResources: false,
+      },
+    })).window;
+    this.DOMPurify = createDOMPurify(window);
 
     const transport = nodemailer.createTransport({
       SES: options.ses,
@@ -70,6 +81,14 @@ class Notifier {
       return;
     }
 
+    // Strip tags from input
+    content = striptags(content);
+    subject = striptags(subject);
+    if (link) {
+      link.text = striptags(link.text);
+      link.href = striptags(link.href);
+    }
+
     debug(`Sending email to ${address}`);
     // It is very, very important that this uses the sanitize option
     let formatted = marked(content, {
@@ -77,10 +96,10 @@ class Notifier {
       tables: true,
       breaks: true,
       pedantic: false,
-      sanitize: true,
       smartLists: true,
       smartypants: false,
     });
+    formatted = this.DOMPurify.sanitize(formatted);
 
     const res = await this.emailer.send({
       message: {
